@@ -4,15 +4,15 @@
  * @description Main Object used
  */
 abstract class VQMod {
-	public static $_vqversion = '2.6.6';						// Current version number
+	public static $_vqversion = '2.6.6.000001';					// Special first subsequent subversion, compatible with Opencart branch, tagged tag v2.6.6-opencart
 
 	private static $_modFileList = array();						// Array of xml files
-	private static $_mods = array();							// Array of modifications to apply
+	private static $_mods = array();								// Array of modifications to apply
 	private static $_filesModded = array();						// Array of already modified files
 	private static $_doNotMod = array();						// Array of files not to apply modifications to
 	private static $_cwd = '';									// Current working directory path
 	private static $_folderChecks = false;						// Flag for already checked log/cache folders exist
-	private static $_cachePathFull = '';						// Full cache folder path
+	private static $_cachePathFull = '';							// Full cache folder path
 	private static $_lastModifiedTime = 0;						// Integer representing the last time anything was modified
 	private static $_devMode = false;							// Flag for developer mode - disables caching while true
 
@@ -638,10 +638,16 @@ class VQModObject {
 
 			$indexCount = 0;
 
+			// Apply full file regex, if specified
+			if($mod['search']->regex === 'trueButAppliedOnFullFile') {
+				$tmp = $this->_applyFullFileRegex($tmp, $mod['search'], $mod['add'], $mod['error']);
+				continue;
+			}
+
 			$tmp = $this->_explodeData($tmp);
 			$lineMax = count($tmp) - 1;
 
-			// <add> tag attributes - Override <search> attributes if set
+			// <add> tag attributes are overriding <search> attributes, if set
 			foreach(array_keys((array)$mod['search']) as $key) {
 				if ($key == "\x0VQNode\x0_content") { continue; }
 				if ($key == "trim") { continue; }
@@ -753,7 +759,6 @@ class VQModObject {
 						$this->_skip = true;
 						return;
 					}
-
 				}
 
 				break;
@@ -765,6 +770,74 @@ class VQModObject {
 		VQMod::$fileModding = false;
 
 		$data = $tmp;
+	}
+
+	/**
+	 * VQModObject::_applyFullFileRegex()
+	 *
+	 * @param string $data File contents
+	 * @param VQSearchNode $search Search node
+	 * @param VQAddNode $add Add node
+	 * @param string $error Error handling mode
+	 * @return string
+	 * @description Applies regex to the full file content
+	 */
+	private function _applyFullFileRegex($data, VQSearchNode $search, VQAddNode $add, string $error) {
+		if(strlen($search->getContent()) === 0) {
+			if($error === 'log' || $error === 'abort') {
+				VQMod::$log->write('VQModObject::_applyFullFileRegex - EMPTY SEARCH CONTENT ERROR', $this);
+			}
+			return $data;
+		}
+
+		if($search->regex === 'trueButAppliedOnFullFile') {
+			$pos = @preg_match($search->getContent(), $data);
+			if($pos === false) {
+				if($error === 'log' || $error === 'abort') {
+					VQMod::$log->write('VQModObject::_applyFullFileRegex - INVALID REGEX ERROR - ' . $search->getContent(), $this);
+				}
+				return $data;
+			} elseif($pos === 0) {
+				if($error === 'log' || $error === 'abort') {
+					VQMod::$log->write('VQModObject::_applyFullFileRegex - SEARCH_1 NOT FOUND: ' . $search->getContent(), $this);
+				}
+				return $data;
+			}
+			$pattern = $search->getContent();
+			$replacement = $add->getContent();
+			$data = preg_replace_callback(
+				$pattern,
+				function ($matches) use ($replacement) {
+					return $replacement;
+				},
+				$data
+			);
+		} elseif($search->regex === 'true') {
+			$pos = @preg_match($search->getContent(), $data);
+			if($pos === false) {
+				if($error === 'log' || $error === 'abort') {
+					VQMod::$log->write('VQModObject::_applyFullFileRegex - INVALID REGEX ERROR - ' . $search->getContent(), $this);
+				}
+				return $data;
+			} elseif($pos === 0) {
+				if($error === 'log' || $error === 'abort') {
+					VQMod::$log->write('VQModObject::_applyFullFileRegex - SEARCH_2 NOT FOUND: ' . $search->getContent(), $this);
+				}
+				return $data;
+			}
+			$data = preg_replace($search->getContent(), $add->getContent(), $data);
+		} else {
+			$pos = strpos($data, $search->getContent());
+			if($pos === false) {
+				if($error === 'log' || $error === 'abort') {
+					VQMod::$log->write('VQModObject::_applyFullFileRegex - SEARCH_3 NOT FOUND: ' . $search->getContent(), $this);
+				}
+				return $data;
+			}
+			$data = str_replace($search->getContent(), $add->getContent(), $data);
+		}
+
+		return $data;
 	}
 
 	/**
@@ -851,8 +924,8 @@ class VQModObject {
 							'fileToMod'		=> $fileToMod,
 							'opIndex'		=> $opIndex,
 						);
-					}
-				}
+							}
+						}
 				VQMod::$fileModding = false;
 			}
 		}
@@ -930,7 +1003,7 @@ class VQSearchNode extends VQNode {
 	public $position = 'replace';
 	public $offset = 0;
 	public $index = 'false';
-	public $regex = 'false';
+	public $regex = 'false'; // Possibles values: 'false', 'true', 'trueButAppliedOnFullFile'
 	public $trim = 'true';
 
 	/**
